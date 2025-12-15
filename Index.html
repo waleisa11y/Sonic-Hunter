@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Audio Hunter: Quick Start</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+
+        :root {
+            --vector-green: #33ff00;
+            --vector-glow: #33ff0080;
+            --bg-color: #050505;
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: var(--bg-color);
+            color: var(--vector-green);
+            font-family: 'VT323', monospace;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            image-rendering: pixelated;
+        }
+
+        .scanlines {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0.2));
+            background-size: 100% 4px;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: 20;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        #score-board {
+            padding: 20px;
+            font-size: 2rem;
+            text-shadow: 0 0 10px var(--vector-glow);
+            letter-spacing: 2px;
+        }
+
+        #message-screen {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+            pointer-events: auto;
+            text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        h1 {
+            font-size: 3.5rem;
+            margin: 0 0 20px 0;
+            text-shadow: 4px 4px 0px #004400, 0 0 20px var(--vector-glow);
+            text-transform: uppercase;
+            line-height: 1;
+        }
+
+        .info-text {
+            font-size: 1.8rem;
+            margin-bottom: 30px;
+            color: #ccc;
+            max-width: 800px;
+            line-height: 1.4;
+            white-space: pre-wrap;
+        }
+
+        .highlight {
+            color: var(--vector-green);
+            font-weight: bold;
+        }
+
+        .btn {
+            margin-top: 20px;
+            padding: 15px 40px;
+            background: transparent;
+            border: 4px solid var(--vector-green);
+            color: var(--vector-green);
+            font-family: 'VT323', monospace;
+            font-size: 2rem;
+            cursor: pointer;
+            text-transform: uppercase;
+            box-shadow: 0 0 15px var(--vector-glow);
+        }
+
+        #gesture-hint {
+            position: absolute;
+            bottom: 20%;
+            width: 100%;
+            text-align: center;
+            color: rgba(51, 255, 0, 0.5);
+            font-size: 1.2rem;
+            pointer-events: none;
+            z-index: 15;
+            display: none;
+        }
+
+        .hidden { display: none !important; }
+        .sr-only { position:absolute; left:-9999px; width:1px; height:1px; }
+
+    </style>
+</head>
+<body>
+
+<div id="game-container" role="main" aria-label="Game Screen">
+    <div class="scanlines"></div>
+    
+    <div id="ui-layer" aria-hidden="true">
+        <div id="score-board"></div>
+    </div>
+
+    <!-- Central Message Screen -->
+    <div id="message-screen">
+        <h1 id="msg-title">Audio Hunter</h1>
+        <div id="msg-text" class="info-text">
+            Headphones Required.<br>
+            Tap START GAME to Initialize Audio Engine.
+        </div>
+        <button id="start-btn" class="btn" onclick="initAudioAndStandby()">START GAME</button>
+    </div>
+
+    <div id="gesture-hint" class="hidden">
+        SWIPE TO TURN • HOLD TO FIRE
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+    <div id="aria-announcer" class="sr-only" aria-live="assertive"></div>
+</div>
+
+<script>
+    /**
+     * CONFIGURATION
+     */
+    const CONFIG = {
+        FPS: 60,
+        FRICTION: 0.94,        
+        SHIP_THRUST: 0.06,     
+        SHIP_TURN_SPEED: 0.015, 
+        SHIP_SIZE: 20,
+        BULLET_SPEED: 7,
+        BULLET_LIFE: 80,
+        
+        // MOVEMENT SETTINGS
+        ASTEROID_SPEED_TUTORIAL: 0.02, 
+        ASTEROID_SPEED_PLAY: 0.15,     
+        
+        ASTEROID_SPAWN_RATE: 8000, 
+        FAST_SPAWN_DELAY: 1000,    
+        AUDIO_MAX_DIST: 900,
+        AIM_ASSIST_ANGLE: Math.PI / 6, 
+        ASTEROID_HP: 1,
+        
+        // Spawning Safety
+        SAFE_DISTANCE: 350, 
+        SPAWN_ANGLE_SEPARATION: Math.PI / 4 
+    };
+
+    /**
+     * GLOBAL STATE
+     */
+    const STATE = {
+        INIT: 'INIT',
+        STANDBY: 'STANDBY',
+        TUTORIAL_INTRO: 'TUTORIAL_INTRO',
+        TUTORIAL_SONAR: 'TUTORIAL_SONAR',
+        TUTORIAL_CRASH: 'TUTORIAL_CRASH',
+        TUTORIAL_SPLIT: 'TUTORIAL_SPLIT',
+        TUTORIAL_DESTROY: 'TUTORIAL_DESTROY',
+        TUTORIAL_PRACTICE: 'TUTORIAL_PRACTICE',
+        PLAYING: 'PLAYING',
+        GAME_OVER: 'GAME_OVER'
+    };
+
+    let currentState = STATE.INIT;
+    let practiceWavesCleared = 0;
+    let lastSpawnAngle = 0; 
+    let tutorialTimeout = null;
+
+    /**
+     * UTILS: Toroidal Math
+     */
+    function getSafeDistance(x1, y1, x2, y2, w, h) {
+        let dx = Math.abs(x1 - x2);
+        let dy = Math.abs(y1 - y2);
+        if (dx > w / 2) dx = w - dx;
+        if (dy > h / 2) dy = h - dy;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function getShortestAngle(x1, y1, x2, y2, w, h) {
+        let dx = x2 - x1;
+        let dy = y2 - y1;
+        if (dx > w / 2) dx -= w;
+        else if (dx < -w / 2) dx += w;
+        if (dy > h / 2) dy -= h;
+        else if (dy < -h / 2) dy += h;
+        return Math.atan2(dy, dx);
+    }
+
+    /**
+     * UI HELPERS
+     */
+    const uiTitle = document.getElementById('msg-title');
+    const uiText = document.getElementById('msg-text');
+    const uiBtn = document.getElementById('start-btn');
+    const uiScreen = document.getElementById('message-screen');
+    const scoreEl = document.getElementById('score-board');
+    const gestureHint = document.getElementById('gesture-hint');
+
+    function updateUI(title, text, showBtn = false, btnText = "", shouldSpeak = true) {
+        uiScreen.classList.remove('hidden');
+        uiTitle.innerHTML = title;
+        uiText.innerHTML = text;
+        if (showBtn) {
+            uiBtn.classList.remove('hidden');
+            uiBtn.innerText = btnText;
+        } else {
+            uiBtn.classList.add('hidden');
+        }
+        
+        if (shouldSpeak) {
+            let speechText = (title + ". " + text);
+            speechText = speechText.replace(/<br\s*\/?>/gi, '. '); 
+            speechText = speechText.replace(/<[^>]*>?/gm, '');
+            AudioEngine.speak(speechText);
+        }
+    }
+
+    function hideUI() {
+        uiScreen.classList.add('hidden');
+    }
+
+    /**
+     * AUDIO ENGINE
+     */
+    const AudioEngine = {
+        ctx: null,
+        masterGain: null,
+        lastBeepTime: 0,
+        panner: null,
+        isSetup: false,
+
+        init: function() {
+            if (this.isSetup) return;
+            try {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                this.ctx = new AudioContext();
+                this.masterGain = this.ctx.createGain();
+                this.masterGain.gain.value = 0.5;
+                this.masterGain.connect(this.ctx.destination);
+                if (this.ctx.createStereoPanner) {
+                    this.panner = this.ctx.createStereoPanner();
+                    this.panner.connect(this.masterGain);
+                } else {
+                    this.panner = this.masterGain;
+                }
+                this.isSetup = true;
+            } catch(e) { console.error("Audio Init Failed", e); }
+        },
+
+        speak: function(text) {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                const u = new SpeechSynthesisUtterance(text);
+                u.rate = 1.0; 
+                window.speechSynthesis.speak(u);
+            }
+            document.getElementById('aria-announcer').innerText = text;
+        },
+
+        triggerPulse: function(panVal) {
+            if (!this.ctx) return;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(1046.50, this.ctx.currentTime); 
+            gain.gain.setValueAtTime(0, this.ctx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.3, this.ctx.currentTime + 0.01); 
+            gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.6); 
+            if (this.panner && this.panner.pan) this.panner.pan.setValueAtTime(panVal, this.ctx.currentTime);
+            osc.connect(gain);
+            if (this.panner.pan) gain.connect(this.panner); else gain.connect(this.masterGain);
+            osc.start();
+            osc.stop(this.ctx.currentTime + 0.65);
+        },
+
+        playSplitSound: function() {
+            if (!this.ctx) return;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(523.25, this.ctx.currentTime); 
+            gain.gain.setValueAtTime(0.4, this.ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.3);
+            osc.connect(gain);
+            gain.connect(this.masterGain);
+            osc.start();
+            osc.stop(this.ctx.currentTime + 0.3);
+        },
+
+        playDestroySound: function() {
+            if (!this.ctx) return;
+            const now = this.ctx.currentTime;
+            const notes = [523.25, 659.25, 783.99]; 
+            notes.forEach((freq, index) => {
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq, now + (index * 0.08));
+                gain.gain.setValueAtTime(0, now + (index * 0.08));
+                gain.gain.linearRampToValueAtTime(0.3, now + (index * 0.08) + 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + (index * 0.08) + 0.3);
+                osc.connect(gain);
+                gain.connect(this.masterGain);
+                osc.start(now + (index * 0.08));
+                osc.stop(now + (index * 0.08) + 0.35);
+            });
+        },
+
+        playPlayerDeath: function() {
+            if (!this.ctx) return;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.frequency.setValueAtTime(100, this.ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(10, this.ctx.currentTime + 1);
+            gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 1);
+            osc.connect(gain);
+            gain.connect(this.masterGain);
+            osc.start();
+            osc.stop(this.ctx.currentTime + 1.1);
+        },
+
+        playLaser: function(type) {
+            if (!this.ctx) return;
+            if (type === 'miss') {
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle'; 
+                osc.frequency.setValueAtTime(300, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(100, this.ctx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+                osc.connect(gain);
+                gain.connect(this.masterGain);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.15);
+            }
+        },
+
+        updateSonar: function(ship, asteroids, width, height) {
+            if (!this.ctx || !ship || ship.dead) return;
+            let nearestDist = Infinity;
+            let nearest = null;
+            
+            for (let i = 0; i < asteroids.length; i++) {
+                const a = asteroids[i];
+                const dist = getSafeDistance(ship.x, ship.y, a.x, a.y, width, height);
+                if (dist < nearestDist) {
+                    nearestDist = dist;
+                    nearest = a;
+                }
+            }
+            
+            if (nearest) {
+                const angleTo = getShortestAngle(ship.x, ship.y, nearest.x, nearest.y, width, height);
+                let diff = angleTo - ship.angle;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                const panVal = Math.max(-1, Math.min(1, diff / (Math.PI / 2)));
+                const distRatio = Math.min(1, nearestDist / CONFIG.AUDIO_MAX_DIST);
+                const interval = 100 + (distRatio * 1100); 
+                const now = Date.now();
+                if (now - this.lastBeepTime > interval) {
+                    this.triggerPulse(panVal);
+                    this.lastBeepTime = now;
+                }
+            }
+        }
+    };
+
+    /**
+     * STATE TRANSITION LOGIC
+     */
+    window.initAudioAndStandby = function() {
+        AudioEngine.init();
+        enterStandby();
+    };
+
+    function clearTutorialDelay() {
+        if (tutorialTimeout) {
+            clearTimeout(tutorialTimeout);
+            tutorialTimeout = null;
+        }
+        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    }
+
+    function enterStandby() {
+        clearTutorialDelay();
+        currentState = STATE.STANDBY;
+        gameRunning = false;
+        asteroids = [];
+        bullets = [];
+        particles = [];
+        if(spawnTimer) clearTimeout(spawnTimer);
+        
+        init(); 
+        asteroids.push(new Asteroid(width*0.2, height*0.2, 3));
+        asteroids.push(new Asteroid(width*0.8, height*0.8, 3));
+        
+        // Updated Main Menu text
+        updateUI(
+            "WELCOME TO AUDIO HUNTER", 
+            "Swipe <span class='highlight'>Up</span> to Play.<br>Swipe <span class='highlight'>Down</span> for Tutorial.<br>Swipe <span class='highlight'>Right</span> for Practice."
+        );
+        gestureHint.classList.add('hidden');
+    }
+
+    function startTutorial() {
+        clearTutorialDelay();
+        currentState = STATE.TUTORIAL_INTRO;
+        updateUI(
+            "TUTORIAL: OBJECTIVE",
+            "Your goal is to destroy invisible targets using 3D Sound.<br><br>" +
+            "<strong>Controls:</strong><br>" +
+            "• Swipe Left or Right to Turn.<br>" +
+            "• Swipe Up to Thrust.<br>" +
+            "• Tap and Hold to Fire.<br><br>" +
+            ". Swipe <span class='highlight'>Right</span> to Continue."
+        );
+    }
+
+    function tutorialSonar() {
+        clearTutorialDelay();
+        currentState = STATE.TUTORIAL_SONAR;
+        updateUI(
+            "NAVIGATION",
+            "Listen for the <strong>DING</strong>.<br>" +
+            "• If you hear it on the Left or Right, turn in that Direction.<br>" +
+            "• Faster, means Closer.<br><br>" +
+            ". Swipe <span class='highlight'>Right</span> to hear the Crash sound.",
+            false, "", false
+        );
+        AudioEngine.triggerPulse(0);
+        tutorialTimeout = setTimeout(() => {
+            AudioEngine.speak("Navigation. Listen for the DING. If you hear it on the Left or Right, turn in that Direction. Faster, means Closer. Swipe Right to hear the Crash sound.");
+            setTimeout(() => AudioEngine.triggerPulse(-0.8), 2000); 
+            setTimeout(() => AudioEngine.triggerPulse(0.8), 3000); 
+        }, 500);
+    }
+
+    function tutorialCrash() {
+        clearTutorialDelay();
+        currentState = STATE.TUTORIAL_CRASH;
+        updateUI(
+            "CRASH WARNING",
+            "When an asteroid gets too close, it will crash with your ship and you will lose.<br>" +
+            "You will hear this sound.<br><br>" +
+            ". Swipe <span class='highlight'>Right</span> to hear the Split sound.",
+            false, "", false
+        );
+        AudioEngine.playPlayerDeath();
+        tutorialTimeout = setTimeout(() => {
+            AudioEngine.speak("Crash Warning. When an asteroid gets too close, it will crash with your ship and you will lose. You will hear this sound. Swipe Right to hear the Split sound.");
+        }, 500);
+    }
+
+    function tutorialSplit() {
+        clearTutorialDelay();
+        currentState = STATE.TUTORIAL_SPLIT;
+        updateUI(
+            "SPLIT",
+            "When you hit a large target, it splits.<br>" +
+            "You will hear a <strong>Single Note</strong>.<br>" +
+            "Note: Shards will teleport to a new safe spot.<br><br>" +
+            ". Swipe <span class='highlight'>Right</span> to hear the Destroy sound.",
+            false, "", false
+        );
+        AudioEngine.playSplitSound();
+        tutorialTimeout = setTimeout(() => {
+            AudioEngine.speak("Split. When you hit a large target, it splits. You will hear a Single Note. Note, Shards will teleport to a new safe spot. Swipe Right to hear the Destroy sound.");
+        }, 500);
+    }
+
+    function tutorialDestroy() {
+        clearTutorialDelay();
+        currentState = STATE.TUTORIAL_DESTROY;
+        updateUI(
+            "DESTROYED",
+            "When a target is fully eliminated.<br>" +
+            "You will hear a <strong>Tri-Tone Arpeggio</strong>.<br><br>" +
+            ". Swipe <span class='highlight'>Right</span> to Practice.",
+            false, "", false
+        );
+        AudioEngine.playDestroySound();
+        tutorialTimeout = setTimeout(() => {
+            AudioEngine.speak("Destroyed. When a target is fully eliminated, you will hear a Tri-Tone Arpeggio. Swipe Right to Practice.");
+        }, 500);
+    }
+
+    function startPractice() {
+        clearTutorialDelay();
+        currentState = STATE.TUTORIAL_PRACTICE;
+        practiceWavesCleared = 0;
+        hideUI();
+        gestureHint.classList.remove('hidden');
+        AudioEngine.speak("Practice Mode. Destroy 3 Full Asteroids. Clear the screen to advance.");
+        startGameLogic(true); 
+    }
+
+    function startGamePlay() {
+        clearTutorialDelay();
+        currentState = STATE.PLAYING;
+        hideUI();
+        gestureHint.classList.remove('hidden');
+        AudioEngine.speak("Game Started. Targets are approaching.");
+        startGameLogic(false);
+    }
+
+    /**
+     * INPUT HANDLING (GESTURES)
+     */
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let isTouching = false;
+    let fireTimeout = null;
+    const SWIPE_THRESHOLD = 40; 
+    const keys = { ArrowUp: false, ArrowLeft: false, ArrowRight: false, Space: false, FireHold: false };
+
+    const gameContainer = document.getElementById('game-container');
+
+    gameContainer.addEventListener('touchstart', (e) => {
+        if(e.target.tagName === 'BUTTON') return;
+        const touch = e.touches[0];
+        touchStartX = touch.clientX;
+        touchStartY = touch.clientY;
+        isTouching = true;
+        
+        if (currentState === STATE.PLAYING || currentState === STATE.TUTORIAL_PRACTICE) {
+            keys.FireHold = false;
+            fireTimeout = setTimeout(() => { keys.FireHold = true; }, 200); 
+        }
+    }, { passive: false });
+
+    gameContainer.addEventListener('touchmove', (e) => {
+        if(!isTouching) return;
+        e.preventDefault(); 
+        const touch = e.touches[0];
+        const deltaX = touch.clientX - touchStartX;
+        const deltaY = touch.clientY - touchStartY;
+
+        if (currentState === STATE.PLAYING || currentState === STATE.TUTORIAL_PRACTICE) {
+            if (Math.abs(deltaX) > SWIPE_THRESHOLD || Math.abs(deltaY) > SWIPE_THRESHOLD) {
+                if (!keys.FireHold) clearTimeout(fireTimeout);
+            }
+            keys.ArrowLeft = false; keys.ArrowRight = false; keys.ArrowUp = false;
+            if (Math.abs(deltaX) > SWIPE_THRESHOLD) {
+                if (deltaX > 0) keys.ArrowRight = true; else keys.ArrowLeft = true;
+            }
+            if (deltaY < -SWIPE_THRESHOLD * 2) keys.ArrowUp = true;
+        }
+    }, { passive: false });
+
+    gameContainer.addEventListener('touchend', (e) => {
+        const touch = e.changedTouches[0];
+        const deltaX = touch.clientX - touchStartX;
+        const deltaY = touch.clientY - touchStartY;
+        const dist = Math.sqrt(deltaX*deltaX + deltaY*deltaY);
+
+        if (currentState !== STATE.PLAYING && currentState !== STATE.TUTORIAL_PRACTICE) {
+            if (Math.abs(deltaX) > Math.abs(deltaY)) {
+                if (deltaX > SWIPE_THRESHOLD) handleSwipe("RIGHT");
+                else if (deltaX < -SWIPE_THRESHOLD) handleSwipe("LEFT");
+            } else {
+                if (deltaY > SWIPE_THRESHOLD) handleSwipe("DOWN");
+                else if (deltaY < -SWIPE_THRESHOLD) handleSwipe("UP");
+            }
+        }
+        else {
+            clearTimeout(fireTimeout);
+            if (dist < SWIPE_THRESHOLD && !keys.FireHold) {
+                keys.Space = true;
+                setTimeout(() => keys.Space = false, 150);
+            }
+            keys.ArrowLeft = false; keys.ArrowRight = false; keys.ArrowUp = false; keys.FireHold = false;
+        }
+        isTouching = false;
+    });
+
+    function handleSwipe(dir) {
+        if (currentState === STATE.STANDBY) {
+            if (dir === "UP") startGamePlay();
+            if (dir === "DOWN") startTutorial();
+            if (dir === "RIGHT") startPractice(); // NEW: Skip to Practice
+        } else if ([STATE.TUTORIAL_INTRO, STATE.TUTORIAL_SONAR, STATE.TUTORIAL_CRASH, STATE.TUTORIAL_SPLIT, STATE.TUTORIAL_DESTROY].includes(currentState)) {
+            if (dir === "RIGHT") advanceTutorial();
+        } else if (currentState === STATE.GAME_OVER) {
+            if (dir === "UP") startGamePlay();
+            if (dir === "DOWN") enterStandby();
+        }
+    }
+
+    function advanceTutorial() {
+        switch(currentState) {
+            case STATE.TUTORIAL_INTRO: tutorialSonar(); break;
+            case STATE.TUTORIAL_SONAR: tutorialCrash(); break;
+            case STATE.TUTORIAL_CRASH: tutorialSplit(); break;
+            case STATE.TUTORIAL_SPLIT: tutorialDestroy(); break;
+            case STATE.TUTORIAL_DESTROY: startPractice(); break;
+        }
+    }
+
+    /**
+     * CANVAS & GAME LOOP
+     */
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    let width, height;
+    function resize() {
+        width = window.innerWidth; height = window.innerHeight;
+        canvas.width = width; canvas.height = height;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    let ship, bullets = [], asteroids = [], particles = [], score = 0, killCount = 0;
+    let gameRunning = false;
+    let spawnTimer = null;
+    let fastSpawnPending = false;
+    let isPractice = false;
+
+    function init() {
+        ship = new Ship();
+        bullets = []; asteroids = []; particles = [];
+        score = 0; killCount = 0;
+        if(scoreEl) scoreEl.innerText = ""; 
+    }
+
+    function startGameLogic(practiceMode) {
+        init();
+        isPractice = practiceMode;
+        gameRunning = true;
+        if(isPractice) scoreEl.innerText = "WAVE: 1 / 3";
+        else scoreEl.innerText = "SCORE: 00000";
+        
+        // Initial spawn - use random logic via undefined
+        asteroids.push(new Asteroid(undefined, undefined, 3));
+        
+        if (!isPractice) {
+            scheduleSpawn(CONFIG.ASTEROID_SPAWN_RATE);
+        }
+    }
+
+    function scheduleSpawn(delay) {
+        if(spawnTimer) clearTimeout(spawnTimer);
+        spawnTimer = setTimeout(() => {
+            if (!gameRunning) return;
+            if(asteroids.length < 2) {
+                asteroids.push(new Asteroid(undefined, undefined, 3));
+            }
+            fastSpawnPending = false;
+            scheduleSpawn(CONFIG.ASTEROID_SPAWN_RATE); 
+        }, delay);
+    }
+
+    function loop() {
+        requestAnimationFrame(loop);
+
+        if (currentState === STATE.STANDBY || currentState === STATE.INIT) {
+            ctx.fillStyle = 'rgba(5, 5, 5, 0.4)';
+            ctx.fillRect(0, 0, width, height);
+            for(let a of asteroids) { a.update(); a.draw(); }
+            return;
+        }
+
+        if (!gameRunning) return;
+
+        ctx.fillStyle = 'rgba(5, 5, 5, 0.4)';
+        ctx.fillRect(0, 0, width, height);
+
+        if (!isPractice && asteroids.length === 0 && !fastSpawnPending && !ship.dead) {
+            fastSpawnPending = true;
+            scheduleSpawn(CONFIG.FAST_SPAWN_DELAY); 
+        }
+
+        if (!ship.dead) {
+            ship.update(asteroids);
+            ship.draw();
+            AudioEngine.updateSonar(ship, asteroids, width, height);
+        }
+
+        for (let i = bullets.length - 1; i >= 0; i--) {
+            bullets[i].update(); bullets[i].draw();
+            if (bullets[i].life <= 0) bullets.splice(i, 1);
+        }
+        for (let a of asteroids) { a.update(); a.draw(); }
+        for (let i = particles.length - 1; i >= 0; i--) {
+            particles[i].update(); particles[i].draw();
+            if (particles[i].life <= 0) particles.splice(i, 1);
+        }
+
+        if(!ship.dead) {
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                for (let j = asteroids.length - 1; j >= 0; j--) {
+                    const b = bullets[i]; const a = asteroids[j];
+                    const dx = b.x - a.x; const dy = b.y - a.y;
+                    if (Math.sqrt(dx*dx + dy*dy) < a.radius * 1.5) {
+                        handleHit(a, j);
+                        bullets.splice(i, 1);
+                        break;
+                    }
+                }
+            }
+            for (let a of asteroids) {
+                const dx = ship.x - a.x; const dy = ship.y - a.y;
+                if (Math.sqrt(dx*dx + dy*dy) < ship.radius + a.radius) {
+                    if (currentState === STATE.PLAYING) {
+                        gameOver();
+                    } else if (currentState === STATE.TUTORIAL_PRACTICE) {
+                        // Safe bounce in tutorial
+                        AudioEngine.playPlayerDeath();
+                        ship.vx *= -1.5; ship.vy *= -1.5;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    function handleHit(hitTarget, idx) {
+        if (hitTarget.size > 1) {
+            AudioEngine.playSplitSound();
+            killCount++;
+            
+            // Safe Split logic with retry
+            const spawnShards = (size) => {
+                let attempts = 0; let safe = false; let nx, ny;
+                while(!safe && attempts < 50) {
+                    attempts++;
+                    const a=Math.random()*Math.PI*2; const d=300+Math.random()*400;
+                    nx=ship.x+Math.cos(a)*d; ny=ship.y+Math.sin(a)*d;
+                    if(nx<0)nx+=width;if(nx>width)nx-=width;if(ny<0)ny+=height;if(ny>height)ny-=height;
+                    const dToShip = getSafeDistance(ship.x, ship.y, nx, ny, width, height);
+                    const angleToShard = getShortestAngle(ship.x, ship.y, nx, ny, width, height);
+                    let diff = angleToShard - lastSpawnAngle;
+                    while (diff < -Math.PI) diff += Math.PI*2; while (diff > Math.PI) diff -= Math.PI*2;
+
+                    if(dToShip > CONFIG.SAFE_DISTANCE && (attempts > 40 || Math.abs(diff) > CONFIG.SPAWN_ANGLE_SEPARATION)) {
+                        safe = true;
+                    }
+                }
+                if(!safe) { nx = (ship.x>width/2)?100:width-100; ny=(ship.y>height/2)?100:height-100; }
+                lastSpawnAngle = getShortestAngle(ship.x, ship.y, nx, ny, width, height);
+                asteroids.push(new Asteroid(nx, ny, size));
+                for(let j=0;j<5;j++)particles.push(new Particle(nx,ny));
+            };
+
+            spawnShards(hitTarget.size - 1);
+            spawnShards(hitTarget.size - 1);
+
+        } else {
+            AudioEngine.playDestroySound();
+            killCount++;
+        }
+
+        if(!isPractice) {
+            score += (4 - hitTarget.size) * 100;
+            scoreEl.innerText = "SCORE: " + score.toString().padStart(5, '0');
+        }
+        
+        asteroids.splice(idx, 1);
+        
+        if (isPractice && asteroids.length === 0) {
+            handlePracticeWaveCleared();
+        }
+    }
+
+    function handlePracticeWaveCleared() {
+        practiceWavesCleared++;
+        
+        if (practiceWavesCleared >= 3) {
+            scoreEl.innerText = "TRAINING COMPLETE";
+            AudioEngine.speak("End of Tutorial.");
+            
+            setTimeout(() => {
+                enterStandby();
+                updateUI("END OF TUTORIAL", "Swipe <span class='highlight'>Up</span> to Play.<br>Swipe <span class='highlight'>Down</span> for Tutorial.");
+            }, 1500);
+        } else {
+            scoreEl.innerText = `WAVE: ${practiceWavesCleared + 1} / 3`;
+            AudioEngine.speak(`Wave ${practiceWavesCleared} cleared.`);
+            setTimeout(() => {
+                asteroids.push(new Asteroid(undefined, undefined, 3));
+            }, 1000);
+        }
+    }
+
+    function gameOver() {
+        if (currentState === STATE.GAME_OVER) return; // Prevent double firing
+        currentState = STATE.GAME_OVER;
+        
+        AudioEngine.playPlayerDeath();
+
+        AudioEngine.speak("Game Over. Final Score " + score + ". Swipe Up to Retry. Swipe Down for Menu.");
+        ship.dead = true;
+        gameRunning = false;
+        gestureHint.classList.add('hidden');
+        
+        setTimeout(() => {
+            updateUI("GAME OVER", `FINAL SCORE: ${score}<br><br>Swipe <span class='highlight'>Up</span> to Retry.<br>Swipe <span class='highlight'>Down</span> for Menu.`);
+        }, 2000);
+    }
+
+    // --- GAME OBJECTS ---
+    class Ship {
+        constructor() { this.x=width/2; this.y=height/2; this.vx=0; this.vy=0; this.angle=-Math.PI/2; this.radius=CONFIG.SHIP_SIZE; this.dead=false; this.reloadTimer=0; this.laserBeam=null; }
+        update(asteroids) {
+            if(keys.ArrowLeft) this.angle-=CONFIG.SHIP_TURN_SPEED; if(keys.ArrowRight) this.angle+=CONFIG.SHIP_TURN_SPEED;
+            if(keys.ArrowUp) { this.vx+=Math.cos(this.angle)*CONFIG.SHIP_THRUST; this.vy+=Math.sin(this.angle)*CONFIG.SHIP_THRUST; if(Math.random()>0.5) particles.push(new Particle(this.x-Math.cos(this.angle)*this.radius, this.y-Math.sin(this.angle)*this.radius)); }
+            this.vx*=CONFIG.FRICTION; this.vy*=CONFIG.FRICTION; this.x+=this.vx; this.y+=this.vy;
+            if(this.x<0)this.x=width; if(this.x>width)this.x=0; if(this.y<0)this.y=height; if(this.y>height)this.y=0;
+            if(this.reloadTimer>0) this.reloadTimer--;
+            if((keys.Space||keys.FireHold) && this.reloadTimer<=0 && !this.dead) this.fire(asteroids);
+            if(this.laserBeam) this.laserBeam.life--;
+        }
+        fire(asteroids) {
+            this.reloadTimer=12; let hitTarget=null; let hitDist=Infinity;
+            for(let a of asteroids) {
+                let dx=a.x-this.x; let dy=a.y-this.y;
+                if(dx>width/2)dx-=width; if(dx<-width/2)dx+=width; if(dy>height/2)dy-=height; if(dy<-height/2)dy+=height;
+                const dist=Math.sqrt(dx*dx+dy*dy);
+                const angleTo=Math.atan2(dy,dx);
+                let diff=angleTo-this.angle;
+                while(diff<-Math.PI)diff+=Math.PI*2; while(diff>Math.PI)diff-=Math.PI*2;
+                if(Math.abs(diff)<=CONFIG.AIM_ASSIST_ANGLE && dist<600) { if(dist<hitDist){hitDist=dist; hitTarget=a;} }
+            }
+            if(hitTarget) {
+                this.laserBeam={x:this.x+Math.cos(this.angle)*this.radius, y:this.y+Math.sin(this.angle)*this.radius, tx:hitTarget.x, ty:hitTarget.y, life:5};
+                const idx=asteroids.indexOf(hitTarget); if(idx>-1) handleHit(hitTarget, idx);
+            } else {
+                AudioEngine.playLaser('miss');
+                bullets.push(new Bullet(this.x+Math.cos(this.angle)*this.radius, this.y+Math.sin(this.angle)*this.radius, this.angle));
+            }
+        }
+        draw() {
+            if(this.dead) return;
+            ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.angle); ctx.lineWidth=3; ctx.shadowBlur=15; ctx.shadowColor='#33ff00'; ctx.strokeStyle='#33ff00';
+            ctx.beginPath(); ctx.moveTo(this.radius,0); ctx.lineTo(-this.radius,this.radius/1.5); ctx.lineTo(-this.radius*0.5,0); ctx.lineTo(-this.radius,-this.radius/1.5); ctx.closePath(); ctx.stroke();
+            ctx.beginPath(); ctx.strokeStyle='rgba(51, 255, 0, 0.2)'; ctx.moveTo(0,0); ctx.arc(0,0,300,-CONFIG.AIM_ASSIST_ANGLE,CONFIG.AIM_ASSIST_ANGLE); ctx.stroke();
+            if(keys.ArrowUp){ctx.beginPath(); ctx.strokeStyle='#ff3300'; ctx.moveTo(-this.radius*0.5,0); ctx.lineTo(-this.radius*1.5,0); ctx.stroke();}
+            ctx.restore();
+            if(this.laserBeam && this.laserBeam.life>0) { ctx.save(); ctx.strokeStyle='#ffffff'; ctx.lineWidth=4; ctx.shadowBlur=20; ctx.shadowColor='#ffffff'; ctx.beginPath(); ctx.moveTo(this.laserBeam.x, this.laserBeam.y); ctx.lineTo(this.laserBeam.tx, this.laserBeam.ty); ctx.stroke(); ctx.restore(); }
+        }
+    }
+
+    class Bullet { constructor(x,y,a){this.x=x;this.y=y;this.vx=Math.cos(a)*CONFIG.BULLET_SPEED;this.vy=Math.sin(a)*CONFIG.BULLET_SPEED;this.life=CONFIG.BULLET_LIFE;} update(){this.x+=this.vx;this.y+=this.vy;this.life--; if(this.x<0)this.x=width;if(this.x>width)this.x=0;if(this.y<0)this.y=height;if(this.y>height)this.y=0;} draw(){ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(this.x,this.y,4,0,Math.PI*2);ctx.fill();} }
+    
+    class Asteroid {
+        constructor(x,y,s){
+            this.size=s;this.radius=s*15;this.hp=1;
+            
+            // --- 360 DEGREE RANDOM SCATTER LOGIC ---
+            if(x===undefined){
+                let validSpawn = false;
+                let attempts = 0;
+                // Center pivot for initial spawn logic
+                const pivotX = (ship && !ship.dead) ? ship.x : width/2;
+                const pivotY = (ship && !ship.dead) ? ship.y : height/2;
+
+                while(!validSpawn && attempts < 50) {
+                    attempts++;
+                    
+                    // Pick ANY random point on screen
+                    const nx = Math.random() * width;
+                    const ny = Math.random() * height;
+                    
+                    // Validate SAFE DISTANCE from ship
+                    const dToShip = getSafeDistance(pivotX, pivotY, nx, ny, width, height);
+                    
+                    if(dToShip > CONFIG.SAFE_DISTANCE) {
+                        // Validate ANGLE SEPARATION from last spawn
+                        const angleToSpawn = getShortestAngle(pivotX, pivotY, nx, ny, width, height);
+                        let diff = angleToSpawn - lastSpawnAngle;
+                        while(diff < -Math.PI) diff += Math.PI*2;
+                        while(diff > Math.PI) diff -= Math.PI*2;
+                        
+                        if (Math.abs(diff) > CONFIG.SPAWN_ANGLE_SEPARATION || attempts > 40) {
+                            this.x = nx;
+                            this.y = ny;
+                            lastSpawnAngle = angleToSpawn;
+                            validSpawn = true;
+                            // Debug particles
+                            for(let j=0; j<5; j++) particles.push(new Particle(this.x, this.y));
+                        }
+                    }
+                }
+                // Failsafe
+                if(!validSpawn) { 
+                    this.x = (pivotX > width/2) ? 100 : width - 100;
+                    this.y = (pivotY > height/2) ? 100 : height - 100;
+                }
+            }else{this.x=x;this.y=y;}
+            
+            if (currentState === STATE.PLAYING) {
+                const tx = ship ? ship.x : width/2; const ty = ship ? ship.y : height/2;
+                const angleToTarget = Math.atan2(ty - this.y, tx - this.x);
+                const moveAngle = angleToTarget + (Math.random() - 0.5) * 0.2; 
+                const speed = CONFIG.ASTEROID_SPEED_PLAY * (0.8 + Math.random() * 0.4);
+                this.vx = Math.cos(moveAngle) * speed; this.vy = Math.sin(moveAngle) * speed;
+            } else {
+                this.vx = 0; 
+                this.vy = 0;
+            }
+            this.rot=Math.random()*Math.PI*2; this.rSp=(Math.random()-0.5)*0.02;
+        }
+        update(){
+            this.x+=this.vx;this.y+=this.vy;this.rot+=this.rSp; 
+            if(this.x<-50)this.x=width+50;if(this.x>width+50)this.x=-50;if(this.y<-50)this.y=height+50;if(this.y>height+50)this.y=-50;
+        }
+        draw(){ctx.save();ctx.translate(this.x,this.y);ctx.rotate(this.rot);ctx.strokeStyle='#33ff00';ctx.shadowColor='#33ff00';ctx.lineWidth=3;ctx.strokeRect(-this.radius,-this.radius,this.radius*2,this.radius*2);ctx.restore();}
+    }
+
+    class Particle { constructor(x,y){this.x=x;this.y=y;this.vx=(Math.random()-0.5)*2;this.vy=(Math.random()-0.5)*2;this.life=40;this.max=40;} update(){this.x+=this.vx;this.y+=this.vy;this.life--;} draw(){ctx.globalAlpha=this.life/this.max;ctx.fillStyle='#33ff00';ctx.fillRect(this.x,this.y,2,2);ctx.globalAlpha=1;} }
+
+    // Start single loop
+    requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>
+
+
