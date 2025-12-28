@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Audio Hunter: Quick Start</title>
+    <title>Sonic Hunter v1.8>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
 
@@ -36,6 +36,7 @@
             width: 100%;
             height: 100%;
             image-rendering: pixelated;
+            filter: drop-shadow(0 0 4px var(--vector-glow)); 
         }
 
         .scanlines {
@@ -111,7 +112,7 @@
             font-size: 2rem;
             cursor: pointer;
             text-transform: uppercase;
-            box-shadow: 0 0 15px var(--vector-glow);
+            box-shadow: 0 0 10px var(--vector-glow);
         }
 
         #gesture-hint {
@@ -142,7 +143,7 @@
 
     <!-- Central Message Screen -->
     <div id="message-screen">
-        <h1 id="msg-title">Audio Hunter</h1>
+        <h1 id="msg-title">Sonic Hunter</h1>
         <div id="msg-text" class="info-text">
             Headphones Required.<br>
             Tap START GAME to Initialize Audio Engine.
@@ -171,19 +172,54 @@
         BULLET_SPEED: 7,
         BULLET_LIFE: 80,
         
-        // MOVEMENT SETTINGS
+        // MOVEMENT
         ASTEROID_SPEED_TUTORIAL: 0.02, 
-        ASTEROID_SPEED_PLAY: 0.15,     
+        ASTEROID_SPEED_PLAY: 0.15,
+        ASTEROID_SPEED_L2: 0.1875,
+        ASTEROID_SPEED_L3: 0.23,
+        ASTEROID_SPEED_L4: 0.29,
+        ASTEROID_SPEED_L5: 0.36,
+        ASTEROID_SPEED_L6: 0.45,
+        ASTEROID_SPEED_L7: 0.56,
+        ASTEROID_SPEED_L8: 0.70,
+        ASTEROID_SPEED_L9: 0.88,
+        ASTEROID_SPEED_L10: 1.10,
         
         ASTEROID_SPAWN_RATE: 8000, 
+        ASTEROID_SPAWN_RATE_L2: 6000, 
+        ASTEROID_SPAWN_RATE_L3: 5000,
+        ASTEROID_SPAWN_RATE_L4: 4000,
+        ASTEROID_SPAWN_RATE_L5: 3000,
+        ASTEROID_SPAWN_RATE_L6: 2500,
+        ASTEROID_SPAWN_RATE_L7: 2000,
+        ASTEROID_SPAWN_RATE_L8: 1500,
+        ASTEROID_SPAWN_RATE_L9: 1000,
+        ASTEROID_SPAWN_RATE_L10: 800,
+
         FAST_SPAWN_DELAY: 1000,    
         AUDIO_MAX_DIST: 900,
         AIM_ASSIST_ANGLE: Math.PI / 6, 
         ASTEROID_HP: 1,
         
         // Spawning Safety
-        SAFE_DISTANCE: 350, 
-        SPAWN_ANGLE_SEPARATION: Math.PI / 4 
+        SAFE_DISTANCE: 350,
+        MIN_SPAWN_DIST: 400,
+        MAX_SPAWN_DIST: 800,
+        SPAWN_ANGLE_SEPARATION: Math.PI / 4,
+        SPAWN_VARIETY_DIST: 300, // Distance from last spawn
+        MAX_PARTICLES: 60,
+        
+        // Goals
+        LEVEL_1_KILLS: 10,
+        LEVEL_2_KILLS: 20,
+        LEVEL_3_KILLS: 30,
+        LEVEL_4_KILLS: 40,
+        LEVEL_5_KILLS: 50,
+        LEVEL_6_KILLS: 60,
+        LEVEL_7_KILLS: 70,
+        LEVEL_8_KILLS: 80,
+        LEVEL_9_KILLS: 90,
+        LEVEL_10_KILLS: 100
     };
 
     /**
@@ -198,12 +234,23 @@
         TUTORIAL_SPLIT: 'TUTORIAL_SPLIT',
         TUTORIAL_DESTROY: 'TUTORIAL_DESTROY',
         TUTORIAL_PRACTICE: 'TUTORIAL_PRACTICE',
-        PLAYING: 'PLAYING',
+        PLAYING_L1: 'PLAYING_L1', LEVEL_1_COMPLETE: 'LEVEL_1_COMPLETE',
+        PLAYING_L2: 'PLAYING_L2', LEVEL_2_COMPLETE: 'LEVEL_2_COMPLETE',
+        PLAYING_L3: 'PLAYING_L3', LEVEL_3_COMPLETE: 'LEVEL_3_COMPLETE',
+        PLAYING_L4: 'PLAYING_L4', LEVEL_4_COMPLETE: 'LEVEL_4_COMPLETE',
+        PLAYING_L5: 'PLAYING_L5', LEVEL_5_COMPLETE: 'LEVEL_5_COMPLETE',
+        PLAYING_L6: 'PLAYING_L6', LEVEL_6_COMPLETE: 'LEVEL_6_COMPLETE',
+        PLAYING_L7: 'PLAYING_L7', LEVEL_7_COMPLETE: 'LEVEL_7_COMPLETE',
+        PLAYING_L8: 'PLAYING_L8', LEVEL_8_COMPLETE: 'LEVEL_8_COMPLETE',
+        PLAYING_L9: 'PLAYING_L9', LEVEL_9_COMPLETE: 'LEVEL_9_COMPLETE',
+        PLAYING_L10: 'PLAYING_L10', LEVEL_10_COMPLETE: 'LEVEL_10_COMPLETE',
         GAME_OVER: 'GAME_OVER'
     };
 
     let currentState = STATE.INIT;
     let practiceWavesCleared = 0;
+    let currentLevelKills = 0;
+    let lastSpawnPos = { x: -9999, y: -9999 };
     let lastSpawnAngle = 0; 
     let tutorialTimeout = null;
 
@@ -226,6 +273,15 @@
         if (dy > h / 2) dy -= h;
         else if (dy < -h / 2) dy += h;
         return Math.atan2(dy, dx);
+    }
+
+    function resetInputs() {
+        keys.ArrowUp = false;
+        keys.ArrowLeft = false;
+        keys.ArrowRight = false;
+        keys.Space = false;
+        keys.FireHold = false;
+        if (fireTimeout) clearTimeout(fireTimeout);
     }
 
     /**
@@ -315,6 +371,40 @@
             osc.stop(this.ctx.currentTime + 0.65);
         },
 
+        playArmorHit: function() {
+            if (!this.ctx) return;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(300, this.ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(800, this.ctx.currentTime + 0.05);
+            gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+            osc.connect(gain);
+            gain.connect(this.masterGain);
+            osc.start();
+            osc.stop(this.ctx.currentTime + 0.12);
+        },
+        
+        playVictory: function() {
+            if (!this.ctx) return;
+            const now = this.ctx.currentTime;
+            const notes = [523.25, 659.25, 783.99, 1046.50]; 
+            notes.forEach((freq, i) => {
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(freq, now + i * 0.15);
+                gain.gain.setValueAtTime(0, now + i * 0.15);
+                gain.gain.linearRampToValueAtTime(0.3, now + i * 0.15 + 0.05);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + i * 0.15 + 0.4);
+                osc.connect(gain);
+                gain.connect(this.masterGain);
+                osc.start(now + i * 0.15);
+                osc.stop(now + i * 0.15 + 0.5);
+            });
+        },
+
         playSplitSound: function() {
             if (!this.ctx) return;
             const osc = this.ctx.createOscillator();
@@ -383,7 +473,6 @@
             if (!this.ctx || !ship || ship.dead) return;
             let nearestDist = Infinity;
             let nearest = null;
-            
             for (let i = 0; i < asteroids.length; i++) {
                 const a = asteroids[i];
                 const dist = getSafeDistance(ship.x, ship.y, a.x, a.y, width, height);
@@ -392,7 +481,6 @@
                     nearest = a;
                 }
             }
-            
             if (nearest) {
                 const angleTo = getShortestAngle(ship.x, ship.y, nearest.x, nearest.y, width, height);
                 let diff = angleTo - ship.angle;
@@ -411,7 +499,7 @@
     };
 
     /**
-     * STATE TRANSITION LOGIC
+     * STATE LOGIC
      */
     window.initAudioAndStandby = function() {
         AudioEngine.init();
@@ -419,10 +507,7 @@
     };
 
     function clearTutorialDelay() {
-        if (tutorialTimeout) {
-            clearTimeout(tutorialTimeout);
-            tutorialTimeout = null;
-        }
+        if (tutorialTimeout) { clearTimeout(tutorialTimeout); tutorialTimeout = null; }
         if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     }
 
@@ -430,18 +515,16 @@
         clearTutorialDelay();
         currentState = STATE.STANDBY;
         gameRunning = false;
-        asteroids = [];
-        bullets = [];
-        particles = [];
+        asteroids = []; bullets = []; particles = [];
         if(spawnTimer) clearTimeout(spawnTimer);
+        resetInputs(); 
         
         init(); 
         asteroids.push(new Asteroid(width*0.2, height*0.2, 3));
         asteroids.push(new Asteroid(width*0.8, height*0.8, 3));
         
-        // Updated Main Menu text
         updateUI(
-            "WELCOME TO AUDIO HUNTER", 
+            "WELCOME TO Sonic HUNTER", 
             "Swipe <span class='highlight'>Up</span> to Play.<br>Swipe <span class='highlight'>Down</span> for Tutorial.<br>Swipe <span class='highlight'>Right</span> for Practice."
         );
         gestureHint.classList.add('hidden');
@@ -450,28 +533,12 @@
     function startTutorial() {
         clearTutorialDelay();
         currentState = STATE.TUTORIAL_INTRO;
-        updateUI(
-            "TUTORIAL: OBJECTIVE",
-            "Your goal is to destroy invisible targets using 3D Sound.<br><br>" +
-            "<strong>Controls:</strong><br>" +
-            "• Swipe Left or Right to Turn.<br>" +
-            "• Swipe Up to Thrust.<br>" +
-            "• Tap and Hold to Fire.<br><br>" +
-            ". Swipe <span class='highlight'>Right</span> to Continue."
-        );
+        updateUI("TUTORIAL: OBJECTIVE", "Your goal is to destroy invisible targets using 3D Sound.<br><br><strong>Controls:</strong><br>• Swipe Left or Right to Turn.<br>• Swipe Up to Thrust.<br>• Tap and Hold to Fire.<br><br>. Swipe <span class='highlight'>Right</span> to Continue.");
     }
 
     function tutorialSonar() {
-        clearTutorialDelay();
-        currentState = STATE.TUTORIAL_SONAR;
-        updateUI(
-            "NAVIGATION",
-            "Listen for the <strong>DING</strong>.<br>" +
-            "• If you hear it on the Left or Right, turn in that Direction.<br>" +
-            "• Faster, means Closer.<br><br>" +
-            ". Swipe <span class='highlight'>Right</span> to hear the Crash sound.",
-            false, "", false
-        );
+        clearTutorialDelay(); currentState = STATE.TUTORIAL_SONAR;
+        updateUI("NAVIGATION", "Listen for the <strong>DING</strong>.<br>• If you hear it on the Left or Right, turn in that Direction.<br>• Faster, means Closer.<br><br>. Swipe <span class='highlight'>Right</span> to hear the Crash sound.", false, "", false);
         AudioEngine.triggerPulse(0);
         tutorialTimeout = setTimeout(() => {
             AudioEngine.speak("Navigation. Listen for the DING. If you hear it on the Left or Right, turn in that Direction. Faster, means Closer. Swipe Right to hear the Crash sound.");
@@ -481,80 +548,73 @@
     }
 
     function tutorialCrash() {
-        clearTutorialDelay();
-        currentState = STATE.TUTORIAL_CRASH;
-        updateUI(
-            "CRASH WARNING",
-            "When an asteroid gets too close, it will crash with your ship and you will lose.<br>" +
-            "You will hear this sound.<br><br>" +
-            ". Swipe <span class='highlight'>Right</span> to hear the Split sound.",
-            false, "", false
-        );
+        clearTutorialDelay(); currentState = STATE.TUTORIAL_CRASH;
+        updateUI("CRASH WARNING", "When an asteroid gets too close, it will crash with your ship and you will lose.<br>You will hear this sound.<br><br>. Swipe <span class='highlight'>Right</span> to hear the Split sound.", false, "", false);
         AudioEngine.playPlayerDeath();
-        tutorialTimeout = setTimeout(() => {
-            AudioEngine.speak("Crash Warning. When an asteroid gets too close, it will crash with your ship and you will lose. You will hear this sound. Swipe Right to hear the Split sound.");
-        }, 500);
+        tutorialTimeout = setTimeout(() => AudioEngine.speak("Crash Warning. When an asteroid gets too close, it will crash with your ship and you will lose. You will hear this sound. Swipe Right to hear the Split sound."), 500);
     }
 
     function tutorialSplit() {
-        clearTutorialDelay();
-        currentState = STATE.TUTORIAL_SPLIT;
-        updateUI(
-            "SPLIT",
-            "When you hit a large target, it splits.<br>" +
-            "You will hear a <strong>Single Note</strong>.<br>" +
-            "Note: Shards will teleport to a new safe spot.<br><br>" +
-            ". Swipe <span class='highlight'>Right</span> to hear the Destroy sound.",
-            false, "", false
-        );
+        clearTutorialDelay(); currentState = STATE.TUTORIAL_SPLIT;
+        updateUI("SPLIT", "When you hit a large target, it splits.<br>You will hear a <strong>Single Note</strong>.<br>Note: Shards will teleport to a new safe spot.<br><br>. Swipe <span class='highlight'>Right</span> to hear the Destroy sound.", false, "", false);
         AudioEngine.playSplitSound();
-        tutorialTimeout = setTimeout(() => {
-            AudioEngine.speak("Split. When you hit a large target, it splits. You will hear a Single Note. Note, Shards will teleport to a new safe spot. Swipe Right to hear the Destroy sound.");
-        }, 500);
+        tutorialTimeout = setTimeout(() => AudioEngine.speak("Split. When you hit a large target, it splits. You will hear a Single Note. Note, Shards will teleport to a new safe spot. Swipe Right to hear the Destroy sound."), 500);
     }
 
     function tutorialDestroy() {
-        clearTutorialDelay();
-        currentState = STATE.TUTORIAL_DESTROY;
-        updateUI(
-            "DESTROYED",
-            "When a target is fully eliminated.<br>" +
-            "You will hear a <strong>Tri-Tone Arpeggio</strong>.<br><br>" +
-            ". Swipe <span class='highlight'>Right</span> to Practice.",
-            false, "", false
-        );
+        clearTutorialDelay(); currentState = STATE.TUTORIAL_DESTROY;
+        updateUI("DESTROYED", "When a target is fully eliminated.<br>You will hear a <strong>Tri-Tone Arpeggio</strong>.<br><br>. Swipe <span class='highlight'>Right</span> to Practice.", false, "", false);
         AudioEngine.playDestroySound();
-        tutorialTimeout = setTimeout(() => {
-            AudioEngine.speak("Destroyed. When a target is fully eliminated, you will hear a Tri-Tone Arpeggio. Swipe Right to Practice.");
-        }, 500);
+        tutorialTimeout = setTimeout(() => AudioEngine.speak("Destroyed. When a target is fully eliminated, you will hear a Tri-Tone Arpeggio. Swipe Right to Practice."), 500);
     }
 
     function startPractice() {
-        clearTutorialDelay();
-        currentState = STATE.TUTORIAL_PRACTICE;
-        practiceWavesCleared = 0;
-        hideUI();
-        gestureHint.classList.remove('hidden');
+        clearTutorialDelay(); currentState = STATE.TUTORIAL_PRACTICE; practiceWavesCleared = 0; hideUI();
+        gestureHint.classList.remove('hidden'); resetInputs();
         AudioEngine.speak("Practice Mode. Destroy 3 Full Asteroids. Clear the screen to advance.");
         startGameLogic(true); 
     }
 
     function startGamePlay() {
-        clearTutorialDelay();
-        currentState = STATE.PLAYING;
-        hideUI();
-        gestureHint.classList.remove('hidden');
-        AudioEngine.speak("Game Started. Targets are approaching.");
+        clearTutorialDelay(); currentState = STATE.PLAYING_L1; currentLevelKills = 0; hideUI();
+        gestureHint.classList.remove('hidden'); resetInputs();
+        AudioEngine.speak("Level One. Destroy 10 asteroids to advance.");
         startGameLogic(false);
     }
 
+    function handleSwipe(dir) {
+        if (currentState === STATE.STANDBY) {
+            if (dir === "UP") startGamePlay();
+            if (dir === "DOWN") startTutorial();
+            if (dir === "RIGHT") startPractice();
+        } else if ([STATE.TUTORIAL_INTRO, STATE.TUTORIAL_SONAR, STATE.TUTORIAL_CRASH, STATE.TUTORIAL_SPLIT, STATE.TUTORIAL_DESTROY].includes(currentState)) {
+            if (dir === "RIGHT") advanceTutorial();
+        } else if (currentState.includes("COMPLETE")) {
+            if (dir === "UP") nextLevel();
+        } else if (currentState === STATE.GAME_OVER) {
+            if (dir === "UP") startGamePlay();
+            if (dir === "DOWN") enterStandby();
+        }
+    }
+
+    function nextLevel() {
+        resetInputs(); 
+        if (currentState === STATE.LEVEL_1_COMPLETE) startLevel2();
+        else if (currentState === STATE.LEVEL_2_COMPLETE) startLevel3();
+        else if (currentState === STATE.LEVEL_3_COMPLETE) startLevel4();
+        else if (currentState === STATE.LEVEL_4_COMPLETE) startLevel5();
+        else if (currentState === STATE.LEVEL_5_COMPLETE) startLevel6();
+        else if (currentState === STATE.LEVEL_6_COMPLETE) startLevel7();
+        else if (currentState === STATE.LEVEL_7_COMPLETE) startLevel8();
+        else if (currentState === STATE.LEVEL_8_COMPLETE) startLevel9();
+        else if (currentState === STATE.LEVEL_9_COMPLETE) startLevel10();
+        else if (currentState === STATE.LEVEL_10_COMPLETE) enterStandby();
+    }
+
     /**
-     * INPUT HANDLING (GESTURES)
+     * INPUT HANDLING
      */
-    let touchStartX = 0;
-    let touchStartY = 0;
-    let isTouching = false;
-    let fireTimeout = null;
+    let touchStartX = 0; let touchStartY = 0; let isTouching = false; let fireTimeout = null;
     const SWIPE_THRESHOLD = 40; 
     const keys = { ArrowUp: false, ArrowLeft: false, ArrowRight: false, Space: false, FireHold: false };
 
@@ -567,7 +627,7 @@
         touchStartY = touch.clientY;
         isTouching = true;
         
-        if (currentState === STATE.PLAYING || currentState === STATE.TUTORIAL_PRACTICE) {
+        if (isGameplayState(currentState)) {
             keys.FireHold = false;
             fireTimeout = setTimeout(() => { keys.FireHold = true; }, 200); 
         }
@@ -580,7 +640,7 @@
         const deltaX = touch.clientX - touchStartX;
         const deltaY = touch.clientY - touchStartY;
 
-        if (currentState === STATE.PLAYING || currentState === STATE.TUTORIAL_PRACTICE) {
+        if (isGameplayState(currentState)) {
             if (Math.abs(deltaX) > SWIPE_THRESHOLD || Math.abs(deltaY) > SWIPE_THRESHOLD) {
                 if (!keys.FireHold) clearTimeout(fireTimeout);
             }
@@ -598,7 +658,7 @@
         const deltaY = touch.clientY - touchStartY;
         const dist = Math.sqrt(deltaX*deltaX + deltaY*deltaY);
 
-        if (currentState !== STATE.PLAYING && currentState !== STATE.TUTORIAL_PRACTICE) {
+        if (!isGameplayState(currentState)) {
             if (Math.abs(deltaX) > Math.abs(deltaY)) {
                 if (deltaX > SWIPE_THRESHOLD) handleSwipe("RIGHT");
                 else if (deltaX < -SWIPE_THRESHOLD) handleSwipe("LEFT");
@@ -618,27 +678,8 @@
         isTouching = false;
     });
 
-    function handleSwipe(dir) {
-        if (currentState === STATE.STANDBY) {
-            if (dir === "UP") startGamePlay();
-            if (dir === "DOWN") startTutorial();
-            if (dir === "RIGHT") startPractice(); // NEW: Skip to Practice
-        } else if ([STATE.TUTORIAL_INTRO, STATE.TUTORIAL_SONAR, STATE.TUTORIAL_CRASH, STATE.TUTORIAL_SPLIT, STATE.TUTORIAL_DESTROY].includes(currentState)) {
-            if (dir === "RIGHT") advanceTutorial();
-        } else if (currentState === STATE.GAME_OVER) {
-            if (dir === "UP") startGamePlay();
-            if (dir === "DOWN") enterStandby();
-        }
-    }
-
-    function advanceTutorial() {
-        switch(currentState) {
-            case STATE.TUTORIAL_INTRO: tutorialSonar(); break;
-            case STATE.TUTORIAL_SONAR: tutorialCrash(); break;
-            case STATE.TUTORIAL_CRASH: tutorialSplit(); break;
-            case STATE.TUTORIAL_SPLIT: tutorialDestroy(); break;
-            case STATE.TUTORIAL_DESTROY: startPractice(); break;
-        }
+    function isGameplayState(s) {
+        return s.startsWith('PLAYING') || s === STATE.TUTORIAL_PRACTICE;
     }
 
     /**
@@ -671,15 +712,42 @@
         init();
         isPractice = practiceMode;
         gameRunning = true;
-        if(isPractice) scoreEl.innerText = "WAVE: 1 / 3";
-        else scoreEl.innerText = "SCORE: 00000";
-        
-        // Initial spawn - use random logic via undefined
-        asteroids.push(new Asteroid(undefined, undefined, 3));
-        
-        if (!isPractice) {
-            scheduleSpawn(CONFIG.ASTEROID_SPAWN_RATE);
+        if(isPractice) {
+            scoreEl.innerText = "WAVE: 1 / 3";
+        } else {
+            scoreEl.innerText = `KILLS: 0 / ${getLevelGoal(currentState)}`;
+            const rate = getSpawnRate(currentState);
+            scheduleSpawn(rate);
         }
+        asteroids.push(new Asteroid(undefined, undefined, 3));
+    }
+
+    function getSpawnRate(state) {
+        if(state===STATE.PLAYING_L1) return CONFIG.ASTEROID_SPAWN_RATE;
+        if(state===STATE.PLAYING_L2) return CONFIG.ASTEROID_SPAWN_RATE_L2;
+        if(state===STATE.PLAYING_L3) return CONFIG.ASTEROID_SPAWN_RATE_L3;
+        if(state===STATE.PLAYING_L4) return CONFIG.ASTEROID_SPAWN_RATE_L4;
+        if(state===STATE.PLAYING_L5) return CONFIG.ASTEROID_SPAWN_RATE_L5;
+        if(state===STATE.PLAYING_L6) return CONFIG.ASTEROID_SPAWN_RATE_L6;
+        if(state===STATE.PLAYING_L7) return CONFIG.ASTEROID_SPAWN_RATE_L7;
+        if(state===STATE.PLAYING_L8) return CONFIG.ASTEROID_SPAWN_RATE_L8;
+        if(state===STATE.PLAYING_L9) return CONFIG.ASTEROID_SPAWN_RATE_L9;
+        if(state===STATE.PLAYING_L10) return CONFIG.ASTEROID_SPAWN_RATE_L10;
+        return CONFIG.ASTEROID_SPAWN_RATE;
+    }
+
+    function getLevelGoal(state) {
+        if(state===STATE.PLAYING_L1) return CONFIG.LEVEL_1_KILLS;
+        if(state===STATE.PLAYING_L2) return CONFIG.LEVEL_2_KILLS;
+        if(state===STATE.PLAYING_L3) return CONFIG.LEVEL_3_KILLS;
+        if(state===STATE.PLAYING_L4) return CONFIG.LEVEL_4_KILLS;
+        if(state===STATE.PLAYING_L5) return CONFIG.LEVEL_5_KILLS;
+        if(state===STATE.PLAYING_L6) return CONFIG.LEVEL_6_KILLS;
+        if(state===STATE.PLAYING_L7) return CONFIG.LEVEL_7_KILLS;
+        if(state===STATE.PLAYING_L8) return CONFIG.LEVEL_8_KILLS;
+        if(state===STATE.PLAYING_L9) return CONFIG.LEVEL_9_KILLS;
+        if(state===STATE.PLAYING_L10) return CONFIG.LEVEL_10_KILLS;
+        return 10;
     }
 
     function scheduleSpawn(delay) {
@@ -690,14 +758,14 @@
                 asteroids.push(new Asteroid(undefined, undefined, 3));
             }
             fastSpawnPending = false;
-            scheduleSpawn(CONFIG.ASTEROID_SPAWN_RATE); 
+            if(!isPractice) scheduleSpawn(getSpawnRate(currentState));
         }, delay);
     }
 
     function loop() {
         requestAnimationFrame(loop);
 
-        if (currentState === STATE.STANDBY || currentState === STATE.INIT) {
+        if (!isGameplayState(currentState)) {
             ctx.fillStyle = 'rgba(5, 5, 5, 0.4)';
             ctx.fillRect(0, 0, width, height);
             for(let a of asteroids) { a.update(); a.draw(); }
@@ -732,23 +800,29 @@
 
         if(!ship.dead) {
             for (let i = bullets.length - 1; i >= 0; i--) {
+                let bulletHit = false;
                 for (let j = asteroids.length - 1; j >= 0; j--) {
                     const b = bullets[i]; const a = asteroids[j];
                     const dx = b.x - a.x; const dy = b.y - a.y;
-                    if (Math.sqrt(dx*dx + dy*dy) < a.radius * 1.5) {
+                    const distSq = dx*dx + dy*dy;
+                    const hitRad = a.radius * 1.5;
+                    if (distSq < hitRad * hitRad) {
                         handleHit(a, j);
                         bullets.splice(i, 1);
+                        bulletHit = true;
                         break;
                     }
                 }
+                if(bulletHit) continue;
             }
             for (let a of asteroids) {
                 const dx = ship.x - a.x; const dy = ship.y - a.y;
-                if (Math.sqrt(dx*dx + dy*dy) < ship.radius + a.radius) {
-                    if (currentState === STATE.PLAYING) {
+                const distSq = dx*dx + dy*dy;
+                const collisionRad = ship.radius + a.radius;
+                if (distSq < collisionRad * collisionRad) {
+                    if (isGameplayState(currentState) && !isPractice) {
                         gameOver();
-                    } else if (currentState === STATE.TUTORIAL_PRACTICE) {
-                        // Safe bounce in tutorial
+                    } else if (isPractice) {
                         AudioEngine.playPlayerDeath();
                         ship.vx *= -1.5; ship.vy *= -1.5;
                     }
@@ -759,29 +833,48 @@
     }
 
     function handleHit(hitTarget, idx) {
+        hitTarget.hp--;
+        hitTarget.flash = 10;
+
+        if (hitTarget.hp > 0) {
+            AudioEngine.playArmorHit();
+            return;
+        }
+
+        const points = hitTarget.maxHp * 10; 
+        
+        if(!isPractice) {
+            score += points;
+            currentLevelKills++;
+            const goal = getLevelGoal(currentState);
+            scoreEl.innerText = `KILLS: ${currentLevelKills} / ${goal}`;
+            
+            if (currentLevelKills >= goal) {
+                completeLevel();
+            }
+        }
+
         if (hitTarget.size > 1) {
             AudioEngine.playSplitSound();
             killCount++;
             
-            // Safe Split logic with retry
             const spawnShards = (size) => {
                 let attempts = 0; let safe = false; let nx, ny;
                 while(!safe && attempts < 50) {
                     attempts++;
-                    const a=Math.random()*Math.PI*2; const d=300+Math.random()*400;
-                    nx=ship.x+Math.cos(a)*d; ny=ship.y+Math.sin(a)*d;
-                    if(nx<0)nx+=width;if(nx>width)nx-=width;if(ny<0)ny+=height;if(ny>height)ny-=height;
+                    // RANDOM 360 POSITION
+                    nx = Math.random() * width;
+                    ny = Math.random() * height;
+                    
                     const dToShip = getSafeDistance(ship.x, ship.y, nx, ny, width, height);
-                    const angleToShard = getShortestAngle(ship.x, ship.y, nx, ny, width, height);
-                    let diff = angleToShard - lastSpawnAngle;
-                    while (diff < -Math.PI) diff += Math.PI*2; while (diff > Math.PI) diff -= Math.PI*2;
-
-                    if(dToShip > CONFIG.SAFE_DISTANCE && (attempts > 40 || Math.abs(diff) > CONFIG.SPAWN_ANGLE_SEPARATION)) {
+                    const dToLast = getSafeDistance(nx, ny, lastSpawnPos.x, lastSpawnPos.y, width, height);
+                    
+                    if(dToShip > CONFIG.SAFE_DISTANCE && dToLast > CONFIG.SPAWN_VARIETY_DIST) {
                         safe = true;
                     }
                 }
                 if(!safe) { nx = (ship.x>width/2)?100:width-100; ny=(ship.y>height/2)?100:height-100; }
-                lastSpawnAngle = getShortestAngle(ship.x, ship.y, nx, ny, width, height);
+                lastSpawnPos = {x:nx, y:ny};
                 asteroids.push(new Asteroid(nx, ny, size));
                 for(let j=0;j<5;j++)particles.push(new Particle(nx,ny));
             };
@@ -793,11 +886,6 @@
             AudioEngine.playDestroySound();
             killCount++;
         }
-
-        if(!isPractice) {
-            score += (4 - hitTarget.size) * 100;
-            scoreEl.innerText = "SCORE: " + score.toString().padStart(5, '0');
-        }
         
         asteroids.splice(idx, 1);
         
@@ -805,14 +893,61 @@
             handlePracticeWaveCleared();
         }
     }
+    
+    function completeLevel() {
+        gameRunning = false;
+        AudioEngine.playVictory();
+        
+        let nextLvl = "", nextGoal = 0, speedUp = "25% Faster";
+        let completeState = "";
+        
+        if (currentState === STATE.PLAYING_L1) { completeState = STATE.LEVEL_1_COMPLETE; nextLvl = "Level 2"; nextGoal = CONFIG.LEVEL_2_KILLS; }
+        else if (currentState === STATE.PLAYING_L2) { completeState = STATE.LEVEL_2_COMPLETE; nextLvl = "Level 3"; nextGoal = CONFIG.LEVEL_3_KILLS; }
+        else if (currentState === STATE.PLAYING_L3) { completeState = STATE.LEVEL_3_COMPLETE; nextLvl = "Level 4"; nextGoal = CONFIG.LEVEL_4_KILLS; }
+        else if (currentState === STATE.PLAYING_L4) { completeState = STATE.LEVEL_4_COMPLETE; nextLvl = "Level 5"; nextGoal = CONFIG.LEVEL_5_KILLS; }
+        else if (currentState === STATE.PLAYING_L5) { completeState = STATE.LEVEL_5_COMPLETE; nextLvl = "Level 6"; nextGoal = CONFIG.LEVEL_6_KILLS; }
+        else if (currentState === STATE.PLAYING_L6) { completeState = STATE.LEVEL_6_COMPLETE; nextLvl = "Level 7"; nextGoal = CONFIG.LEVEL_7_KILLS; }
+        else if (currentState === STATE.PLAYING_L7) { completeState = STATE.LEVEL_7_COMPLETE; nextLvl = "Level 8"; nextGoal = CONFIG.LEVEL_8_KILLS; }
+        else if (currentState === STATE.PLAYING_L8) { completeState = STATE.LEVEL_8_COMPLETE; nextLvl = "Level 9"; nextGoal = CONFIG.LEVEL_9_KILLS; }
+        else if (currentState === STATE.PLAYING_L9) { completeState = STATE.LEVEL_9_COMPLETE; nextLvl = "Level 10"; nextGoal = CONFIG.LEVEL_10_KILLS; }
+        else if (currentState === STATE.PLAYING_L10) { completeLevel10(); return; }
+
+        currentState = completeState;
+        AudioEngine.speak(`Level Complete. ${nextLvl} ready.`);
+        setTimeout(() => updateUI("LEVEL COMPLETE", `Next: ${nextLvl}.<br>Goal: ${nextGoal} Kills.<br>Speed: ${speedUp}.<br><br>Swipe <span class='highlight'>UP</span> to Start.`), 1500);
+    }
+    
+    function completeLevel10() {
+        currentState = STATE.LEVEL_10_COMPLETE;
+        gameRunning = false;
+        AudioEngine.speak("Mission Complete. You are the ultimate hunter.");
+        setTimeout(() => updateUI("MISSION COMPLETE", "Final Score: " + score + ".<br>Swipe <span class='highlight'>UP</span> for Menu."), 1500);
+    }
+    
+    // START LEVEL HELPERS
+    function startLevel2() { setupLevel(STATE.PLAYING_L2, "Level 2"); }
+    function startLevel3() { setupLevel(STATE.PLAYING_L3, "Level 3"); }
+    function startLevel4() { setupLevel(STATE.PLAYING_L4, "Level 4"); }
+    function startLevel5() { setupLevel(STATE.PLAYING_L5, "Level 5"); }
+    function startLevel6() { setupLevel(STATE.PLAYING_L6, "Level 6"); }
+    function startLevel7() { setupLevel(STATE.PLAYING_L7, "Level 7"); }
+    function startLevel8() { setupLevel(STATE.PLAYING_L8, "Level 8"); }
+    function startLevel9() { setupLevel(STATE.PLAYING_L9, "Level 9"); }
+    function startLevel10() { setupLevel(STATE.PLAYING_L10, "Level 10"); }
+
+    function setupLevel(state, name) {
+        currentState = state; currentLevelKills = 0; hideUI();
+        AudioEngine.speak(`${name} Started.`);
+        gameRunning = true; resetInputs();
+        scheduleSpawn(getSpawnRate(state));
+        if(asteroids.length===0) asteroids.push(new Asteroid(undefined, undefined, 3));
+    }
 
     function handlePracticeWaveCleared() {
         practiceWavesCleared++;
-        
         if (practiceWavesCleared >= 3) {
             scoreEl.innerText = "TRAINING COMPLETE";
             AudioEngine.speak("End of Tutorial.");
-            
             setTimeout(() => {
                 enterStandby();
                 updateUI("END OF TUTORIAL", "Swipe <span class='highlight'>Up</span> to Play.<br>Swipe <span class='highlight'>Down</span> for Tutorial.");
@@ -827,16 +962,13 @@
     }
 
     function gameOver() {
-        if (currentState === STATE.GAME_OVER) return; // Prevent double firing
+        if (currentState === STATE.GAME_OVER) return;
         currentState = STATE.GAME_OVER;
-        
         AudioEngine.playPlayerDeath();
-
         AudioEngine.speak("Game Over. Final Score " + score + ". Swipe Up to Retry. Swipe Down for Menu.");
         ship.dead = true;
         gameRunning = false;
         gestureHint.classList.add('hidden');
-        
         setTimeout(() => {
             updateUI("GAME OVER", `FINAL SCORE: ${score}<br><br>Swipe <span class='highlight'>Up</span> to Retry.<br>Swipe <span class='highlight'>Down</span> for Menu.`);
         }, 2000);
@@ -859,11 +991,11 @@
             for(let a of asteroids) {
                 let dx=a.x-this.x; let dy=a.y-this.y;
                 if(dx>width/2)dx-=width; if(dx<-width/2)dx+=width; if(dy>height/2)dy-=height; if(dy<-height/2)dy+=height;
-                const dist=Math.sqrt(dx*dx+dy*dy);
+                const distSq=dx*dx+dy*dy;
                 const angleTo=Math.atan2(dy,dx);
                 let diff=angleTo-this.angle;
                 while(diff<-Math.PI)diff+=Math.PI*2; while(diff>Math.PI)diff-=Math.PI*2;
-                if(Math.abs(diff)<=CONFIG.AIM_ASSIST_ANGLE && dist<600) { if(dist<hitDist){hitDist=dist; hitTarget=a;} }
+                if(Math.abs(diff)<=CONFIG.AIM_ASSIST_ANGLE && distSq<360000) { if(distSq<hitDist){hitDist=distSq; hitTarget=a;} }
             }
             if(hitTarget) {
                 this.laserBeam={x:this.x+Math.cos(this.angle)*this.radius, y:this.y+Math.sin(this.angle)*this.radius, tx:hitTarget.x, ty:hitTarget.y, life:5};
@@ -875,12 +1007,12 @@
         }
         draw() {
             if(this.dead) return;
-            ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.angle); ctx.lineWidth=3; ctx.shadowBlur=15; ctx.shadowColor='#33ff00'; ctx.strokeStyle='#33ff00';
+            ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.angle); ctx.lineWidth=3; ctx.shadowBlur=0; ctx.strokeStyle='#33ff00';
             ctx.beginPath(); ctx.moveTo(this.radius,0); ctx.lineTo(-this.radius,this.radius/1.5); ctx.lineTo(-this.radius*0.5,0); ctx.lineTo(-this.radius,-this.radius/1.5); ctx.closePath(); ctx.stroke();
             ctx.beginPath(); ctx.strokeStyle='rgba(51, 255, 0, 0.2)'; ctx.moveTo(0,0); ctx.arc(0,0,300,-CONFIG.AIM_ASSIST_ANGLE,CONFIG.AIM_ASSIST_ANGLE); ctx.stroke();
             if(keys.ArrowUp){ctx.beginPath(); ctx.strokeStyle='#ff3300'; ctx.moveTo(-this.radius*0.5,0); ctx.lineTo(-this.radius*1.5,0); ctx.stroke();}
             ctx.restore();
-            if(this.laserBeam && this.laserBeam.life>0) { ctx.save(); ctx.strokeStyle='#ffffff'; ctx.lineWidth=4; ctx.shadowBlur=20; ctx.shadowColor='#ffffff'; ctx.beginPath(); ctx.moveTo(this.laserBeam.x, this.laserBeam.y); ctx.lineTo(this.laserBeam.tx, this.laserBeam.ty); ctx.stroke(); ctx.restore(); }
+            if(this.laserBeam && this.laserBeam.life>0) { ctx.save(); ctx.strokeStyle='#ffffff'; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(this.laserBeam.x, this.laserBeam.y); ctx.lineTo(this.laserBeam.tx, this.laserBeam.ty); ctx.stroke(); ctx.restore(); }
         }
     }
 
@@ -888,67 +1020,69 @@
     
     class Asteroid {
         constructor(x,y,s){
-            this.size=s;this.radius=s*15;this.hp=1;
-            
-            // --- 360 DEGREE RANDOM SCATTER LOGIC ---
+            this.size=s;this.radius=s*15;this.hp=s;this.maxHp=s;this.flash=0;
             if(x===undefined){
-                let validSpawn = false;
-                let attempts = 0;
-                // Center pivot for initial spawn logic
-                const pivotX = (ship && !ship.dead) ? ship.x : width/2;
-                const pivotY = (ship && !ship.dead) ? ship.y : height/2;
-
-                while(!validSpawn && attempts < 50) {
+                let safe=false, attempts=0;
+                while(!safe && attempts < 50) {
                     attempts++;
-                    
-                    // Pick ANY random point on screen
+                    // RANDOM 360 POSITION
                     const nx = Math.random() * width;
                     const ny = Math.random() * height;
                     
-                    // Validate SAFE DISTANCE from ship
-                    const dToShip = getSafeDistance(pivotX, pivotY, nx, ny, width, height);
+                    const dToShip = getSafeDistance(ship.x, ship.y, nx, ny, width, height);
+                    const dToLast = getSafeDistance(nx, ny, lastSpawnPos.x, lastSpawnPos.y, width, height);
                     
-                    if(dToShip > CONFIG.SAFE_DISTANCE) {
-                        // Validate ANGLE SEPARATION from last spawn
-                        const angleToSpawn = getShortestAngle(pivotX, pivotY, nx, ny, width, height);
-                        let diff = angleToSpawn - lastSpawnAngle;
-                        while(diff < -Math.PI) diff += Math.PI*2;
-                        while(diff > Math.PI) diff -= Math.PI*2;
-                        
-                        if (Math.abs(diff) > CONFIG.SPAWN_ANGLE_SEPARATION || attempts > 40) {
-                            this.x = nx;
-                            this.y = ny;
-                            lastSpawnAngle = angleToSpawn;
-                            validSpawn = true;
-                            // Debug particles
-                            for(let j=0; j<5; j++) particles.push(new Particle(this.x, this.y));
-                        }
+                    if(dToShip > CONFIG.SAFE_DISTANCE && dToLast > CONFIG.SPAWN_VARIETY_DIST) {
+                        this.x = nx; this.y = ny; lastSpawnPos={x:nx,y:ny}; safe=true;
+                        for(let j=0;j<5;j++)particles.push(new Particle(this.x,this.y));
                     }
                 }
-                // Failsafe
-                if(!validSpawn) { 
-                    this.x = (pivotX > width/2) ? 100 : width - 100;
-                    this.y = (pivotY > height/2) ? 100 : height - 100;
-                }
+                if(!safe) { this.x = (width/2) + 400; this.y = height/2; }
             }else{this.x=x;this.y=y;}
             
-            if (currentState === STATE.PLAYING) {
+            // Movement Speed logic
+            let speed = 0;
+            if (currentState === STATE.PLAYING_L1) speed = CONFIG.ASTEROID_SPEED_PLAY * (0.8 + Math.random() * 0.4);
+            else if (currentState === STATE.PLAYING_L2) speed = CONFIG.ASTEROID_SPEED_L2 * (0.8 + Math.random() * 0.4);
+            else if (currentState === STATE.PLAYING_L3) speed = CONFIG.ASTEROID_SPEED_L3 * (0.8 + Math.random() * 0.4);
+            else if (currentState === STATE.PLAYING_L4) speed = CONFIG.ASTEROID_SPEED_L4 * (0.8 + Math.random() * 0.4);
+            else if (currentState === STATE.PLAYING_L5) speed = CONFIG.ASTEROID_SPEED_L5 * (0.8 + Math.random() * 0.4);
+            else if (currentState === STATE.PLAYING_L6) speed = CONFIG.ASTEROID_SPEED_L6 * (0.8 + Math.random() * 0.4);
+            else if (currentState === STATE.PLAYING_L7) speed = CONFIG.ASTEROID_SPEED_L7 * (0.8 + Math.random() * 0.4);
+            else if (currentState === STATE.PLAYING_L8) speed = CONFIG.ASTEROID_SPEED_L8 * (0.8 + Math.random() * 0.4);
+            else if (currentState === STATE.PLAYING_L9) speed = CONFIG.ASTEROID_SPEED_L9 * (0.8 + Math.random() * 0.4);
+            else if (currentState === STATE.PLAYING_L10) speed = CONFIG.ASTEROID_SPEED_L10 * (0.8 + Math.random() * 0.4);
+            else if (currentState === STATE.TUTORIAL_PRACTICE) speed = 0; 
+            else speed = CONFIG.ASTEROID_SPEED_TUTORIAL; 
+
+            if (speed > 0 && isGameplayState(currentState)) {
                 const tx = ship ? ship.x : width/2; const ty = ship ? ship.y : height/2;
                 const angleToTarget = Math.atan2(ty - this.y, tx - this.x);
-                const moveAngle = angleToTarget + (Math.random() - 0.5) * 0.2; 
-                const speed = CONFIG.ASTEROID_SPEED_PLAY * (0.8 + Math.random() * 0.4);
+                const moveAngle = angleToTarget + (Math.random() - 0.5) * 0.2;
                 this.vx = Math.cos(moveAngle) * speed; this.vy = Math.sin(moveAngle) * speed;
-            } else {
-                this.vx = 0; 
-                this.vy = 0;
-            }
+            } else if (currentState === STATE.STANDBY || currentState === STATE.INIT) {
+                 const angleToCenter = Math.atan2(height/2 - this.y, width/2 - this.x);
+                 this.vx = Math.cos(angleToCenter) * speed; this.vy = Math.sin(angleToCenter) * speed;
+            } else { this.vx = 0; this.vy = 0; }
             this.rot=Math.random()*Math.PI*2; this.rSp=(Math.random()-0.5)*0.02;
         }
         update(){
             this.x+=this.vx;this.y+=this.vy;this.rot+=this.rSp; 
             if(this.x<-50)this.x=width+50;if(this.x>width+50)this.x=-50;if(this.y<-50)this.y=height+50;if(this.y>height+50)this.y=-50;
+            if(this.flash>0)this.flash--;
         }
-        draw(){ctx.save();ctx.translate(this.x,this.y);ctx.rotate(this.rot);ctx.strokeStyle='#33ff00';ctx.shadowColor='#33ff00';ctx.lineWidth=3;ctx.strokeRect(-this.radius,-this.radius,this.radius*2,this.radius*2);ctx.restore();}
+        draw(){
+            ctx.save();ctx.translate(this.x,this.y);ctx.rotate(this.rot);
+            if(this.flash>0){ctx.strokeStyle='#fff';ctx.lineWidth=4;}else{ctx.strokeStyle='#33ff00';ctx.lineWidth=3;}
+            ctx.shadowColor=this.flash>0?'#fff':'#33ff00';
+            ctx.strokeRect(-this.radius,-this.radius,this.radius*2,this.radius*2);
+            if(this.size>1){
+                ctx.fillStyle=this.flash>0?'#fff':'#33ff00';
+                const pipS=4; const off=(this.hp-1)*pipS;
+                for(let i=0;i<this.hp;i++) ctx.fillRect(-off+(i*pipS*2),-2,pipS,pipS);
+            }
+            ctx.restore();
+        }
     }
 
     class Particle { constructor(x,y){this.x=x;this.y=y;this.vx=(Math.random()-0.5)*2;this.vy=(Math.random()-0.5)*2;this.life=40;this.max=40;} update(){this.x+=this.vx;this.y+=this.vy;this.life--;} draw(){ctx.globalAlpha=this.life/this.max;ctx.fillStyle='#33ff00';ctx.fillRect(this.x,this.y,2,2);ctx.globalAlpha=1;} }
